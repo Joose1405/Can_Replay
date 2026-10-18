@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Velocímetro ROS 2</title>
+<style>
+:root{
+  --bg:#0f1b26; --panel:#162634; --line:#2a4054; --ink:#e8eef2; --muted:#8fa3b3;
+  --accent:#5cc8e8; --warn:#f2b84b; --bad:#e5675a;
+  --num:"Bahnschrift","DIN Alternate","Segoe UI",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,"Segoe UI",sans-serif}
+main{max-width:1000px;margin:0 auto;padding:20px 16px 32px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+h1{font-size:20px;font-weight:600;margin:0}
+.pill{display:flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);font-size:14px}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--muted)}
+.pill[data-state=live] .dot{background:var(--accent)}
+.pill[data-state=stale] .dot{background:var(--warn)}
+.pill[data-state=off] .dot{background:var(--bad)}
+.cluster{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:16px;align-items:stretch}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+svg{width:100%;height:auto;display:block}
+.track{fill:none;stroke:var(--line);stroke-width:10;stroke-linecap:round}
+#valArc{fill:none;stroke:var(--accent);stroke-width:10;stroke-linecap:round;transition:stroke .3s}
+.tick{stroke:var(--muted);stroke-width:2}
+.tick.minor{stroke:var(--line);stroke-width:1.5}
+.lbl{fill:var(--muted);font:13px var(--num);text-anchor:middle;dominant-baseline:middle}
+#needle line{stroke:var(--ink);stroke-width:4;stroke-linecap:round}
+#hub{fill:var(--accent)}
+#num{fill:var(--ink);font:600 66px var(--num);text-anchor:middle;font-variant-numeric:tabular-nums}
+#unitTxt{fill:var(--muted);font:500 18px var(--num);text-anchor:middle}
+.stale #num{fill:var(--muted)}
+.stale #valArc{stroke:var(--warn)}
+.side{display:flex;flex-direction:column;gap:14px}
+.side h2{font-size:15px;font-weight:600;margin:0 0 8px}
+dl{margin:0;display:grid;gap:10px}
+dt{color:var(--muted);font-size:13px}
+dd{margin:0;font:600 24px var(--num);font-variant-numeric:tabular-nums}
+button{font:inherit;color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:8px;padding:8px 12px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#hint{color:var(--muted);font-size:13px;margin:0;overflow-wrap:anywhere}
+#hint code{color:var(--ink)}
+.trend{margin-top:16px}
+.trend h2{font-size:15px;font-weight:600;margin:0 0 8px}
+canvas{width:100%;height:200px;display:block}
+@media(max-width:720px){.cluster{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Velocidad del vehículo</h1>
+    <div class="pill" id="status" data-state="connecting"><span class="dot"></span><span id="statusText">Conectando…</span></div>
+  </header>
+
+  <section class="cluster">
+    <div class="card" id="gaugeCard">
+      <svg viewBox="0 0 400 320" role="img" aria-label="Velocímetro">
+        <path class="track" id="track"/>
+        <path id="valArc"/>
+        <g id="ticks"></g>
+        <g id="needle"><line x1="200" y1="185" x2="200" y2="89"/></g>
+        <circle id="hub" cx="200" cy="185" r="9"/>
+        <text id="num" x="200" y="262">--</text>
+        <text id="unitTxt" x="200" y="290">km/h</text>
+      </svg>
+    </div>
+
+    <div class="side">
+      <div class="card">
+        <h2>Resumen</h2>
+        <dl>
+          <dt>Velocidad máxima de esta sesión</dt><dd id="maxV">--</dd>
+          <dt>Promedio del último minuto</dt><dd id="avgV">--</dd>
+          <dt>Frecuencia de datos</dt><dd id="rate">--</dd>
+        </dl>
+      </div>
+      <div class="card">
+        <button id="unitBtn" type="button" aria-label="Cambiar unidad">Unidad: km/h</button>
+        <p id="hint" style="margin-top:12px"></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card trend">
+    <h2>Último minuto</h2>
+    <canvas id="chart" aria-label="Gráfica de velocidad en el tiempo"></canvas>
+  </section>
+</main>
+
+<script>
+/* ---------- Configuración (se puede cambiar por URL: ?url=ws://IP:9090&topic=/x&unit=ms&demo=1) ---------- */
+const P = new URLSearchParams(location.search);
+const CFG = {
+  url:   P.get('url')   || 'ws://' + (location.hostname || 'localhost') + ':9090',
+  topic: P.get('topic') || '/vehicle/speed_kmh',
+  type:  'std_msgs/Float32',
+  source: P.get('unit') || 'kmh',          // unidad que publica el tópico: kmh | ms | mph
+  staleMs: 3000,                            // sin mensajes durante este tiempo => "sin datos"
+  windowS: 60,                              // ventana de la gráfica
+  demo: P.has('demo')
+};
+const UNITS = {
+  kmh: {label:'km/h', f:1,       max:200, step:20},
+  mph: {label:'mph',  f:0.621371, max:120, step:20},
+  ms:  {label:'m/s',  f:1/3.6,    max:60,  step:10}
+};
+const toKmh = v => CFG.source === 'ms' ? v * 3.6 : CFG.source === 'mph' ? v / 0.621371 : v;
+
+/* ---------- Estado ---------- */
+let unit = 'kmh', latest = null, shown = 0, lastMsg = 0, maxSeen = 0, connected = false;
+const samples = [];                         // {t (ms), v (km/h)}
+const $ = id => document.getElementById(id);
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- Geometría del velocímetro ---------- */
+const CX = 200, CY = 185, A0 = -135, A1 = 135;
+const pt = (a, r) => [CX + r * Math.sin(a * Math.PI / 180), CY - r * Math.cos(a * Math.PI / 180)];
+function arcPath(a0, a1, r){
+  const [x0, y0] = pt(a0, r), [x1, y1] = pt(a1, r);
+  return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${(a1 - a0) > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+}
+const angleFor = v => A0 + (A1 - A0) * Math.min(Math.max(v / UNITS[unit].max, 0), 1);
+
+function buildGauge(){
+  const u = UNITS[unit], g = $('ticks');
+  g.innerHTML = '';
+  $('track').setAttribute('d', arcPath(A0, A1, 150));
+  for (let v = 0; v <= u.max + 1e-6; v += u.step / 2){
+    const major = Math.abs(v / u.step - Math.round(v / u.step)) < 1e-6;
+    const a = A0 + (A1 - A0) * v / u.max;
+    const [x0, y0] = pt(a, 136), [x1, y1] = pt(a, major ? 122 : 129);
+    const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    l.setAttribute('class', 'tick' + (major ? '' : ' minor'));
+    l.setAttribute('x1', x0); l.setAttribute('y1', y0); l.setAttribute('x2', x1); l.setAttribute('y2', y1);
+    g.appendChild(l);
+    if (major){
+      const [tx, ty] = pt(a, 106);
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('class', 'lbl'); t.setAttribute('x', tx); t.setAttribute('y', ty);
+      t.textContent = Math.round(v);
+      g.appendChild(t);
+    }
+  }
+  $('unitTxt').textContent = u.label;
+  $('unitBtn').textContent = 'Unidad: ' + u.label;
+}
+
+function render(dt){
+  const u = UNITS[unit];
+  if (latest !== null){
+    const tau = reduced ? 0.05 : 0.4;
+    shown += (latest - shown) * (1 - Math.exp(-dt / tau));
+  }
+  const dv = shown * u.f, a = angleFor(dv);
+  $('needle').setAttribute('transform', `rotate(${a} ${CX} ${CY})`);
+  $('valArc').setAttribute('d', dv < 0.2 ? '' : arcPath(A0, Math.max(a, A0 + 0.5), 150));
+  $('num').textContent = latest === null ? '--' : Math.round(latest * u.f);
+}
+
+/* ---------- Estado de conexión y datos ---------- */
+function setStatus(state, text){
+  $('status').dataset.state = state;
+  $('statusText').textContent = text;
+  $('hint').innerHTML = state === 'off'
+    ? 'Inicia rosbridge con <code>ros2 launch rosbridge_server rosbridge_websocket_launch.xml</code> y revisa que la dirección sea <code>' + CFG.url + '</code>.'
+    : '';
+}
+
+function onSpeed(raw){
+  const v = toKmh(raw), now = performance.now();
+  latest = v; lastMsg = now;
+  if (samples.length === 0) shown = v;      // primer dato: la aguja no arranca desde 0
+  samples.push({t: now, v});
+  if (v > maxSeen) maxSeen = v;
+  while (samples.length && now - samples[0].t > CFG.windowS * 1000) samples.shift();
+}
+
+function updateStatus(now){
+  const u = UNITS[unit];
+  const age = now - lastMsg, hasData = latest !== null;
+  const isStale = hasData && age > CFG.staleMs;
+  $('gaugeCard').classList.toggle('stale', isStale);
+  if (!connected && !CFG.demo) return;
+  if (!hasData) setStatus('live', 'Conectado, esperando datos…');
+  else if (isStale) setStatus('stale', 'Sin datos desde hace ' + Math.round(age / 1000) + ' s');
+  else {
+    const recent = samples.filter(s => now - s.t < 10000);
+    const hz = recent.length > 1 ? (recent.length - 1) / ((recent[recent.length - 1].t - recent[0].t) / 1000) : 0;
+    setStatus('live', 'En vivo');
+    $('rate').textContent = hz ? hz.toFixed(1) + ' Hz' : '--';
+  }
+  $('maxV').textContent = hasData ? Math.round(maxSeen * u.f) + ' ' + u.label : '--';
+  const avgSrc = samples.filter(s => now - s.t < 60000);
+  $('avgV').textContent = avgSrc.length ? Math.round(avgSrc.reduce((s, x) => s + x.v, 0) / avgSrc.length * u.f) + ' ' + u.label : '--';
+}
+
+/* ---------- Gráfica (canvas, escalón: no inventa valores entre mensajes) ---------- */
+function drawChart(now){
+  const c = $('chart'), dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = c.clientHeight;
+  if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)){ c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+  const x = c.getContext('2d'); x.setTransform(dpr, 0, 0, dpr, 0, 0); x.clearRect(0, 0, w, h);
+  const u = UNITS[unit], L = 40, B = 20, T = 6, W = w - L - 6, H = h - B - T;
+  const Y = v => T + H * (1 - Math.min(v / u.max, 1)), X = t => L + W * (1 - (now - t) / (CFG.windowS * 1000));
+  x.font = '12px system-ui'; x.fillStyle = '#8fa3b3'; x.strokeStyle = '#2a4054'; x.lineWidth = 1; x.textAlign = 'right'; x.textBaseline = 'middle';
+  for (let v = 0; v <= u.max; v += u.step * 2){ const y = Math.round(Y(v)) + .5; x.beginPath(); x.moveTo(L, y); x.lineTo(w - 6, y); x.stroke(); x.fillText(v, L - 6, y); }
+  x.textAlign = 'center'; x.textBaseline = 'top';
+  [0, 20, 40, 60].forEach(s => { if (s <= CFG.windowS) x.fillText(s === 0 ? 'ahora' : '-' + s + ' s', X(now - s * 1000) - (s === 0 ? 14 : 0), h - B + 4); });
+  if (!samples.length) return;
+  x.strokeStyle = '#5cc8e8'; x.lineWidth = 2.5; x.lineJoin = 'round'; x.beginPath();
+  samples.forEach((s, i) => { const px = X(s.t), py = Y(s.v * u.f); if (i === 0) x.moveTo(px, py); else { x.lineTo(px, Y(samples[i - 1].v * u.f)); x.lineTo(px, py); } });
+  x.lineTo(X(now), Y(samples[samples.length - 1].v * u.f)); x.stroke();
+}
+
+/* ---------- Bucle de animación ---------- */
+let prev = performance.now();
+function frame(now){
+  const dt = (now - prev) / 1000; prev = now;
+  render(dt); updateStatus(now); drawChart(now);
+  requestAnimationFrame(frame);
+}
+
+/* ---------- Conexión con rosbridge ---------- */
+function loadScript(src){
+  return new Promise((ok, fail) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = fail; document.head.appendChild(s); });
+}
+function connect(){
+  setStatus('connecting', 'Conectando a ' + CFG.url + '…');
+  const ros = new ROSLIB.Ros({url: CFG.url});
+  ros.on('connection', () => {
+    connected = true;
+    setStatus('live', 'Conectado, esperando datos…');
+    new ROSLIB.Topic({ros, name: CFG.topic, messageType: CFG.type}).subscribe(m => onSpeed(m.data));
+  });
+  ros.on('error', () => {});
+  ros.on('close', () => { connected = false; setStatus('off', 'Sin conexión con rosbridge'); setTimeout(connect, 2000); });
+}
+
+function startDemo(){
+  setStatus('live', 'Modo demostración (datos simulados)');
+  const t0 = performance.now();
+  setInterval(() => { const t = (performance.now() - t0) / 1000; onSpeed(toKmhInv(Math.max(0, 70 + 55 * Math.sin(t / 9) + 6 * Math.sin(t * 1.7)))); }, 200);
+}
+const toKmhInv = kmh => CFG.source === 'ms' ? kmh / 3.6 : CFG.source === 'mph' ? kmh * 0.621371 : kmh;
+
+/* ---------- Arranque ---------- */
+$('unitBtn').addEventListener('click', () => {
+  unit = unit === 'kmh' ? 'mph' : unit === 'mph' ? 'ms' : 'kmh';
+  buildGauge();
+});
+buildGauge();
+requestAnimationFrame(frame);
+
+if (CFG.demo) startDemo();
+else loadScript('roslib.min.js')
+  .catch(() => loadScript('https://cdn.jsdelivr.net/npm/roslib@1.4.1/build/roslib.min.js'))
+  .then(connect)
+  .catch(() => setStatus('off', 'No se pudo cargar roslib.js (descárgalo junto a esta página)'));
+</script>
+</body>
+</html>

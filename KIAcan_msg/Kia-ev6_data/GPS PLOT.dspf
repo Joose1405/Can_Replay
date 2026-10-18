@@ -1,0 +1,135 @@
+{
+  "selected_channels": [],
+  "windows": [
+    {
+      "title": "GPS 0",
+      "configuration": {
+        "latitude_channel": "Latitude",
+        "longitude_channel": "Longitude",
+        "zoom": 13,
+        "tile_provider": "TopPlusOpen.Color",
+        "tile_provider_url": "http://sgx.geodatenzentrum.de/wmts_topplus_open/tile/1.0.0/web/default/WEBMERCATOR/{z}/{y}/{x}.png",
+        "tile_provider_attribution": "Map data: &copy; <a href=\"http://www.govdata.de/dl-de/by-2-0\">dl-de/by-2-0</a>"
+      },
+      "geometry": [
+        0,
+        0,
+        1103,
+        387
+      ],
+      "maximized": false,
+      "minimized": false,
+      "type": "GPS"
+    },
+    {
+      "title": "Plot 0",
+      "configuration": {
+        "channels": [
+          {
+            "type": "channel",
+            "name": "Speed",
+            "unit": "m/s",
+            "flags": 0,
+            "enabled": true,
+            "individual_axis": false,
+            "common_axis": false,
+            "color": "#1f77b4",
+            "computed": false,
+            "ranges": [],
+            "precision": 3,
+            "fmt": "{:.3f}",
+            "format": "phys",
+            "mode": "phys",
+            "y_range": [
+              -0.1811832987951334,
+              24.69457670120487
+            ],
+            "origin_uuid": "6cef9301e464"
+          }
+        ],
+        "pattern": {},
+        "splitter": [
+          434,
+          655,
+          0
+        ],
+        "x_range": [
+          240430.61661565103,
+          241509.34893565104
+        ],
+        "y_axis_width": 48.0,
+        "grid": [
+          false,
+          false
+        ],
+        "cursor_precision": 6,
+        "font_size": 9,
+        "locked": false,
+        "common_axis_y_range": [
+          0.0,
+          1.0
+        ],
+        "channels_header": [
+          434,
+          [
+            86,
+            0,
+            83,
+            33,
+            30,
+            30,
+            0
+          ]
+        ],
+        "channels_header_sizes": [
+          434,
+          {
+            "NameColumn": 86,
+            "RawColumn": 0,
+            "ValueColumn": 83,
+            "UnitColumn": 33,
+            "CommonAxisColumn": 30,
+            "IndividualAxisColumn": 30,
+            "OriginColumn": 0
+          }
+        ],
+        "channels_header_columns_visible": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          false
+        ],
+        "channels_header_columns_visiblity": {
+          "NameColumn": true,
+          "RawColumn": false,
+          "ValueColumn": true,
+          "UnitColumn": true,
+          "CommonAxisColumn": true,
+          "IndividualAxisColumn": true,
+          "OriginColumn": false
+        },
+        "hide_axes": false,
+        "hide_selected_channel_value_panel": false,
+        "focused_mode": false,
+        "delta_mode": "value",
+        "hide_bookmarks": true,
+        "hide_missing_channels": false,
+        "hide_disabled_channels": false
+      },
+      "geometry": [
+        0,
+        387,
+        1103,
+        387
+      ],
+      "maximized": false,
+      "minimized": false,
+      "type": "Plot"
+    }
+  ],
+  "active_window": "GPS 0",
+  "functions": {},
+  "global_variables": ""
+}
